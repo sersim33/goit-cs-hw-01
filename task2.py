@@ -10,7 +10,11 @@ class TokenType:
     INTEGER = "INTEGER"
     PLUS = "PLUS"
     MINUS = "MINUS"
-    EOF = "EOF"  # Означає кінець вхідного рядка
+    MUL = "MUL"
+    DIV = "DIV"
+    LPAREN = "LPAREN"
+    RPAREN = "RPAREN"
+    EOF = "EOF"  # End of input
 
 
 class Token:
@@ -26,23 +30,23 @@ class Lexer:
     def __init__(self, text):
         self.text = text
         self.pos = 0
-        self.current_char = self.text[self.pos]
+        self.current_char = self.text[self.pos] if self.text else None
 
     def advance(self):
-        """Переміщуємо 'вказівник' на наступний символ вхідного рядка"""
+        """Move to the next character in the input string."""
         self.pos += 1
         if self.pos > len(self.text) - 1:
-            self.current_char = None  # Означає кінець введення
+            self.current_char = None  # End of input
         else:
             self.current_char = self.text[self.pos]
 
     def skip_whitespace(self):
-        """Пропускаємо пробільні символи."""
+        """Skip whitespace characters."""
         while self.current_char is not None and self.current_char.isspace():
             self.advance()
 
     def integer(self):
-        """Повертаємо ціле число, зібране з послідовності цифр."""
+        """Return a multi-digit integer consumed from the input."""
         result = ""
         while self.current_char is not None and self.current_char.isdigit():
             result += self.current_char
@@ -50,7 +54,7 @@ class Lexer:
         return int(result)
 
     def get_next_token(self):
-        """Лексичний аналізатор, що розбиває вхідний рядок на токени."""
+        """Lexical analyzer to break the input into tokens."""
         while self.current_char is not None:
             if self.current_char.isspace():
                 self.skip_whitespace()
@@ -67,7 +71,23 @@ class Lexer:
                 self.advance()
                 return Token(TokenType.MINUS, "-")
 
-            raise LexicalError("Помилка лексичного аналізу")
+            if self.current_char == "*":
+                self.advance()
+                return Token(TokenType.MUL, "*")
+
+            if self.current_char == "/":
+                self.advance()
+                return Token(TokenType.DIV, "/")
+
+            if self.current_char == "(":
+                self.advance()
+                return Token(TokenType.LPAREN, "(")
+
+            if self.current_char == ")":
+                self.advance()
+                return Token(TokenType.RPAREN, ")")
+
+            raise LexicalError("Invalid character")
 
         return Token(TokenType.EOF, None)
 
@@ -95,26 +115,40 @@ class Parser:
         self.current_token = self.lexer.get_next_token()
 
     def error(self):
-        raise ParsingError("Помилка синтаксичного аналізу")
+        raise ParsingError("Syntax error")
 
     def eat(self, token_type):
-        """
-        Порівнюємо поточний токен з очікуваним токеном і, якщо вони збігаються,
-        'поглинаємо' його і переходимо до наступного токена.
-        """
         if self.current_token.type == token_type:
             self.current_token = self.lexer.get_next_token()
         else:
             self.error()
 
-    def term(self):
-        """Парсер для 'term' правил граматики. У нашому випадку - це цілі числа."""
+    def factor(self):
         token = self.current_token
-        self.eat(TokenType.INTEGER)
-        return Num(token)
+        if token.type == TokenType.INTEGER:
+            self.eat(TokenType.INTEGER)
+            return Num(token)
+        elif token.type == TokenType.LPAREN:
+            self.eat(TokenType.LPAREN)
+            node = self.expr()
+            self.eat(TokenType.RPAREN)
+            return node
+
+    def term(self):
+        node = self.factor()
+
+        while self.current_token.type in (TokenType.MUL, TokenType.DIV):
+            token = self.current_token
+            if token.type == TokenType.MUL:
+                self.eat(TokenType.MUL)
+            elif token.type == TokenType.DIV:
+                self.eat(TokenType.DIV)
+
+            node = BinOp(left=node, op=token, right=self.factor())
+
+        return node
 
     def expr(self):
-        """Парсер для арифметичних виразів."""
         node = self.term()
 
         while self.current_token.type in (TokenType.PLUS, TokenType.MINUS):
@@ -153,6 +187,10 @@ class Interpreter:
             return self.visit(node.left) + self.visit(node.right)
         elif node.op.type == TokenType.MINUS:
             return self.visit(node.left) - self.visit(node.right)
+        elif node.op.type == TokenType.MUL:
+            return self.visit(node.left) * self.visit(node.right)
+        elif node.op.type == TokenType.DIV:
+            return self.visit(node.left) / self.visit(node.right)
 
     def visit_Num(self, node):
         return node.value
@@ -167,15 +205,15 @@ class Interpreter:
         return visitor(node)
 
     def generic_visit(self, node):
-        raise Exception(f"Немає методу visit_{type(node).__name__}")
+        raise Exception(f"No visit_{type(node).__name__} method")
 
 
 def main():
     while True:
         try:
-            text = input('Введіть вираз (або "exit" для виходу): ')
+            text = input('Enter an expression (or "exit" to quit): ')
             if text.lower() == "exit":
-                print("Вихід із програми.")
+                print("Exiting the program.")
                 break
             lexer = Lexer(text)
             parser = Parser(lexer)
